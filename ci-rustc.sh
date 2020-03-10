@@ -49,7 +49,8 @@ build_clang() {
 build_libunwind() {
   build_dir=$1
   clang=$2
-
+  clangxx=$3
+  
   print_header "Building libunwind"
  
   rm -rf ${build_dir} || true
@@ -57,7 +58,7 @@ build_libunwind() {
   pushd ${build_dir}
   export AR=$(which ar)
   export CC=${clang}
-  export CXX=${clang}
+  export CXX=${clangxx}
   
   ${repo_root}/src/ci/docker/dist-various-2/build-x86_64-fortanix-unknown-sgx-toolchain.sh "800f95131fe6acd20b96b6f4723ca3c820f3d379"
   popd
@@ -95,6 +96,6 @@ build_rustc() {
 
 init_repository
 build_clang "${repo_root}/clang-build"
-build_libunwind "${repo_root}/libunwind-build" "${repo_root}/clang-build/bin/clang"
+build_libunwind "${repo_root}/libunwind-build" "${repo_root}/clang-build/bin/clang" "${repo_root}/clang-build/bin/clang++"
 build_rustc "${repo_root}/rust-build"
 
