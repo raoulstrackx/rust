@@ -1,8 +1,7 @@
 #!/bin/bash
 
 set -eu
-bash_dir=$(readlink -f $(dirname "${BASH_SOURCE[0]}"))
-source ${bash_dir}/shared.sh
+source shared.sh
 
 if [ -z "$1" ]; then
     echo "Usage: ${0} <commit_id>"
@@ -24,7 +23,6 @@ install_prereq() {
 
 build_unwind() {
     set -x
-    tdir=$(pwd)
     dir_name="${target}_temp"
     rm -rf ${dir_name}
     mkdir -p ${dir_name}
@@ -37,14 +35,12 @@ build_unwind() {
     # Build libunwind
     mkdir -p build
     cd build
-    cflags="-mlvi-hardening -mllvm -x86-lvi-load-inline-asm"
-    export CXXFLAGS=${cflags}
-    export CFLAGS=${cflags}
     cmake -DCMAKE_BUILD_TYPE="RELEASE" -DRUST_SGX=1 -G "Unix Makefiles" \
         -DLLVM_ENABLE_WARNINGS=1 -DLIBUNWIND_ENABLE_WERROR=1 -DLIBUNWIND_ENABLE_PEDANTIC=0 \
         -DLLVM_PATH=../../llvm/ ../
     make unwind_static
-    install -D "lib/libunwind.a" "/${target}/lib/libunwind.a" || cp lib/libunwind.a ${tdir}
+    install -D "lib/libunwind.a" "/${target}/lib/libunwind.a"
+
     popd
     rm -rf ${dir_name}
 

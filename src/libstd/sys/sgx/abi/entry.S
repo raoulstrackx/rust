@@ -109,7 +109,7 @@ IMAGE_BASE:
     .abort
     .endif
         mov $(1<<tcsls_flag_secondary),%e\reg
-        and %gs:tcsls_flags, %\reg; lfence
+        and %gs:tcsls_flags,%\reg
 .endm
 
 /* We place the ELF entry point in a separate section so it can be removed by
@@ -152,7 +152,7 @@ elf_entry:
     andq $~0x40400, (%rsp)
     popfq
 /*  check for abort */
-    bt $0,.Laborted(%rip); lfence
+    bt $0,.Laborted(%rip)
     jc .Lreentry_panic
 .endm
 
@@ -173,19 +173,19 @@ sgx_entry:
     fnstcw %gs:tcsls_user_fcw
 
 /*  check for debug buffer pointer */
-    testb  $0xff,DEBUG(%rip); lfence
+    testb  $0xff,DEBUG(%rip)
     jz .Lskip_debug_init
     mov %r10,%gs:tcsls_debug_panic_buf_ptr
 .Lskip_debug_init:
 /*  check if returning from usercall */
-    mov %gs:tcsls_last_rsp,%r11; lfence
+    mov %gs:tcsls_last_rsp,%r11
     test %r11,%r11
     jnz .Lusercall_ret
 /*  reset user state */
-    ldmxcsr .Lmxcsr_init(%rip); lfence
-    fldcw .Lfpucw_init(%rip); lfence
+    ldmxcsr .Lmxcsr_init(%rip)
+    fldcw .Lfpucw_init(%rip)
 /*  setup stack */
-    mov %gs:tcsls_tos,%rsp; lfence /*  initially, RSP is not set to the correct value */
+    mov %gs:tcsls_tos,%rsp /*  initially, RSP is not set to the correct value */
                            /*  here. This is fixed below under "adjust stack". */
 /*  check for thread init */
     bts $tcsls_flag_init_once,%gs:tcsls_flags
@@ -240,21 +240,21 @@ sgx_entry:
     mov %rdx, %rcx /*  save RDX */
     mov $-1, %rax
     mov %rax, %rdx
-    xrstor .Lxsave_clear(%rip); lfence
+    xrstor .Lxsave_clear(%rip)
     mov %rcx, %rdx /*  restore RDX */
 /*  clear flags */
     pushq $0
     popfq
 /*  restore user registers */
-    mov %gs:tcsls_user_r12,%r12; lfence
-    mov %gs:tcsls_user_r13,%r13; lfence
-    mov %gs:tcsls_user_r14,%r14; lfence
-    mov %gs:tcsls_user_r15,%r15; lfence
-    mov %gs:tcsls_user_retip,%rbx; lfence
-    mov %gs:tcsls_user_rsp,%rsp; lfence
-    mov %gs:tcsls_user_rbp,%rbp; lfence
-    fldcw %gs:tcsls_user_fcw; lfence
-    ldmxcsr %gs:tcsls_user_mxcsr; lfence
+    mov %gs:tcsls_user_r12,%r12
+    mov %gs:tcsls_user_r13,%r13
+    mov %gs:tcsls_user_r14,%r14
+    mov %gs:tcsls_user_r15,%r15
+    mov %gs:tcsls_user_retip,%rbx
+    mov %gs:tcsls_user_rsp,%rsp
+    mov %gs:tcsls_user_rbp,%rbp
+    fldcw %gs:tcsls_user_fcw
+    ldmxcsr %gs:tcsls_user_mxcsr
 /*  exit enclave */
     mov $0x4,%eax /*  EEXIT */
     enclu
@@ -275,7 +275,7 @@ usercall:
 /* set aborted bit */
     movb $1,.Laborted(%rip)
 /* save registers in DEBUG mode, so that debugger can reconstruct the stack */
-    testb $0xff,DEBUG(%rip); lfence
+    testb $0xff,DEBUG(%rip)
     jz .Lusercall_noreturn
 .Lusercall_save_state:
 /*  save callee-saved state */
@@ -311,20 +311,20 @@ usercall:
     movq $0,%gs:tcsls_last_rsp
 /*  restore callee-saved state, cf. "save" above */
     mov %r11,%rsp
-    ldmxcsr (%rsp); lfence
-    fldcw 4(%rsp); lfence
+    ldmxcsr (%rsp)
+    fldcw 4(%rsp)
     add $8, %rsp
     entry_sanitize_final
-    pop %rbx; lfence
-    pop %rbp; lfence
-    pop %r12; lfence
-    pop %r13; lfence
-    pop %r14; lfence
-    pop %r15; lfence
+    pop %rbx
+    pop %rbp
+    pop %r12
+    pop %r13
+    pop %r14
+    pop %r15
 /*  return */
     mov %rsi,%rax /*  RAX = return value */
     /* NOP: mov %rdx,%rdx */ /*  RDX = return value */
-    notq (%rsp); notq (%rsp); lfence; ret
+    ret
 
 /*
 The following functions need to be defined externally:
@@ -342,21 +342,21 @@ extern "C" fn entry(p1: u64, p2: u64, p3: u64, secondary: bool, p4: u64, p5: u64
 
 .global get_tcs_addr
 get_tcs_addr:
-    mov %gs:tcsls_tcs_addr,%rax; lfence
-    notq (%rsp); notq (%rsp); lfence; ret
+    mov %gs:tcsls_tcs_addr,%rax
+    ret
 
 .global get_tls_ptr
 get_tls_ptr:
-    mov %gs:tcsls_tls_ptr,%rax; lfence
-    notq (%rsp); notq (%rsp); lfence; ret
+    mov %gs:tcsls_tls_ptr,%rax
+    ret
 
 .global set_tls_ptr
 set_tls_ptr:
     mov %rdi,%gs:tcsls_tls_ptr
-    notq (%rsp); notq (%rsp); lfence; ret
+    ret
 
 .global take_debug_panic_buf_ptr
 take_debug_panic_buf_ptr:
     xor %rax,%rax
-    xchg %gs:tcsls_debug_panic_buf_ptr,%rax; lfence
-    notq (%rsp); notq (%rsp); lfence; ret
+    xchg %gs:tcsls_debug_panic_buf_ptr,%rax
+    ret
