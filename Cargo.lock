@@ -558,8 +558,7 @@ dependencies = [
 [[package]]
 name = "compiler_builtins"
 version = "0.1.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "438ac08ddc5efe81452f984a9e33ba425b00b31d1f48e6acd9e2210aa28cc52e"
+source = "git+ssh://git@bitbucket.org/fortanix/compiler-builtins.git?branch=raoul/lvi#4f4f43f1ebe7c649b60344c67a08db6cc23d134b"
 dependencies = [
  "cc",
  "rustc-std-workspace-core",

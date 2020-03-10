@@ -64,5 +64,7 @@ rustc-std-workspace-core = { path = 'src/tools/rustc-std-workspace-core' }
 rustc-std-workspace-alloc = { path = 'src/tools/rustc-std-workspace-alloc' }
 rustc-std-workspace-std = { path = 'src/tools/rustc-std-workspace-std' }
 
+compiler_builtins = { git = "ssh://git@bitbucket.org/fortanix/compiler-builtins.git", branch = "raoul/lvi" }
+
 [patch."https://github.com/rust-lang/rust-clippy"]
 clippy_lints = { path = "src/tools/clippy/clippy_lints" }
