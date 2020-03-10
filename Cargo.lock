@@ -136,8 +136,7 @@ dependencies = [
 [[package]]
 name = "backtrace-sys"
 version = "0.1.32"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d6575f128516de27e3ce99689419835fce9643a9b215a14d2b5b685be018491"
+source = "git+https://github.com/raoulstrackx/backtrace-rs.git?branch=lvi#593fa2e2dae4b49a9a908a9c8687fe8e7c645325"
 dependencies = [
  "cc",
  "compiler_builtins",
@@ -558,8 +557,7 @@ dependencies = [
 [[package]]
 name = "compiler_builtins"
 version = "0.1.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "438ac08ddc5efe81452f984a9e33ba425b00b31d1f48e6acd9e2210aa28cc52e"
+source = "git+ssh://git@bitbucket.org/fortanix/compiler-builtins.git?branch=raoul/lvi#3e6327aa59214133fa74b3c51743b5ebde39526f"
 dependencies = [
  "cc",
  "rustc-std-workspace-core",

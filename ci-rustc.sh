@@ -68,6 +68,8 @@ build_libunwind() {
 
 build_rustc() {
   install_dir=$1
+  clang=$2
+  clangxx=$3
   
   print_header "Building rustc"
   
@@ -78,6 +80,13 @@ build_rustc() {
   rm -r ${install_dir} || true
   rm ${repo_root}/rustc.tar || true
 
+  cflags="-mlvi-hardening -mllvm -x86-lvi-load-inline-asm"
+  export AR=$(which ar)
+  export CC=${clang}
+  export CXX=${clangxx}
+#  export CXXFLAGS=${cflags}
+#  export CFLAGS=${cflags}
+  export AR=$(which ar)
   git submodule update --init --recursive
   
   mkdir ${install_dir} || true
@@ -97,5 +106,5 @@ build_rustc() {
 init_repository
 build_clang "${repo_root}/clang-build"
 build_libunwind "${repo_root}/libunwind-build" "${repo_root}/clang-build/bin/clang" "${repo_root}/clang-build/bin/clang++"
-build_rustc "${repo_root}/rust-build"
+build_rustc "${repo_root}/rust-build" "${repo_root}/clang-build/bin/clang" "${repo_root}/clang-build/bin/clang++"
 
