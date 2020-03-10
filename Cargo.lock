@@ -136,8 +136,7 @@ dependencies = [
 [[package]]
 name = "backtrace-sys"
 version = "0.1.32"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d6575f128516de27e3ce99689419835fce9643a9b215a14d2b5b685be018491"
+source = "git+https://github.com/raoulstrackx/backtrace-rs.git?branch=lvi#417599229f23bfd40f386ad6233cb05af78f9d2b"
 dependencies = [
  "cc",
  "compiler_builtins",
