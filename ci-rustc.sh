@@ -55,6 +55,7 @@ build_libunwind() {
   rm -rf ${build_dir} || true
   mkdir ${build_dir}
   pushd ${build_dir}
+  export AR=$(which ar)
   export CC=${clang}
   export CXX=${clang}
   
