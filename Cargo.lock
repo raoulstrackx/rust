@@ -136,7 +136,7 @@ dependencies = [
 [[package]]
 name = "backtrace-sys"
 version = "0.1.32"
-source = "git+https://github.com/raoulstrackx/backtrace-rs.git?branch=lvi#417599229f23bfd40f386ad6233cb05af78f9d2b"
+source = "git+https://github.com/raoulstrackx/backtrace-rs.git?branch=lvi#593fa2e2dae4b49a9a908a9c8687fe8e7c645325"
 dependencies = [
  "cc",
  "compiler_builtins",
@@ -557,7 +557,7 @@ dependencies = [
 [[package]]
 name = "compiler_builtins"
 version = "0.1.25"
-source = "git+ssh://git@bitbucket.org/fortanix/compiler-builtins.git?branch=raoul/lvi#4f4f43f1ebe7c649b60344c67a08db6cc23d134b"
+source = "git+ssh://git@bitbucket.org/fortanix/compiler-builtins.git?branch=raoul/lvi#3e6327aa59214133fa74b3c51743b5ebde39526f"
 dependencies = [
  "cc",
  "rustc-std-workspace-core",

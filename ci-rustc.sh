@@ -84,8 +84,8 @@ build_rustc() {
   export AR=$(which ar)
   export CC=${clang}
   export CXX=${clangxx}
-  export CXXFLAGS=${cflags}
-  export CFLAGS=${cflags}
+#  export CXXFLAGS=${cflags}
+#  export CFLAGS=${cflags}
   export AR=$(which ar)
   git submodule update --init --recursive
   
