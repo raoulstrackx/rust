@@ -557,7 +557,7 @@ dependencies = [
 [[package]]
 name = "compiler_builtins"
 version = "0.1.25"
-source = "git+ssh://git@bitbucket.org/fortanix/compiler-builtins.git?branch=raoul/lvi#3e6327aa59214133fa74b3c51743b5ebde39526f"
+source = "git+ssh://git@bitbucket.org/fortanix/compiler-builtins.git?branch=raoul/lvi#01f65055fb02646e61cb20dac9303014c0465dd8"
 dependencies = [
  "cc",
  "rustc-std-workspace-core",
