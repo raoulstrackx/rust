@@ -76,7 +76,7 @@ build_rustc() {
   pushd ${repo_root}
 
   rm ${repo_root}/config.toml || true
-  rm ${repo_root}/build || true
+  rm -rf ${repo_root}/build || true
   rm -r ${install_dir} || true
   rm ${repo_root}/rustc.tar || true
 
