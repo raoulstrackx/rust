@@ -13,7 +13,7 @@ function build {
             # These come from the top-level Rust workspace, that this crate is not a
             # member of, but Cargo tries to load the workspace `Cargo.toml` anyway.
             env RUSTC_BOOTSTRAP=1 CC=${S}/clang-build/bin/clang CFLAGS="-mlvi-hardening -mllvm -x86-lvi-load-inline-asm" \
-                $CARGO -v run --target $TARGET           
+                $CARGO -vv run --target $TARGET
         popd
     popd
 }
@@ -39,3 +39,4 @@ build
 
 check fprintf fprintf.checks	
 check cc_plus_one_c cc_plus_one_c.checks
+check cc_plus_one_c_asm cc_plus_one_c_asm.checks
