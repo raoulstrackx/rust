@@ -1,0 +1,9 @@
+CHECK: fprintf
+CHECK:      lfence
+CHECK:      lfence
+CHECK:      lfence
+CHECK:      popq
+CHECK-NEXT: popq
+CHECK-NEXT: popq [[REGISTER:%[a-z]+]]
+CHECK-NEXT: lfence
+CHECK-NEXT: jmpq *[[REGISTER]]

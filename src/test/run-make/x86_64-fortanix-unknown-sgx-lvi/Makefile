@@ -13,5 +13,10 @@ all:
 	#${FILECHECK} --input-file $(TMPDIR)/unw_getcontext.asm unw_getcontext.checks
 	
 	#TODO: re-enable check when newly compiled libunwind is used
-	${OBJDUMP} -d --disassemble-functions="libunwind::Registers_x86_64::jumpto()" --demangle $(TMPDIR)/enclave > $(TMPDIR)/jumpto.asm
-	${FILECHECK} --input-file $(TMPDIR)/jumpto.asm jumpto.checks
+	#${OBJDUMP} -d --disassemble-functions="libunwind::Registers_x86_64::jumpto()" --demangle $(TMPDIR)/enclave > $(TMPDIR)/jumpto.asm
+	#${FILECHECK} --input-file $(TMPDIR)/jumpto.asm jumpto.checks
+	
+	${OBJDUMP} -d --disassemble-functions="fprintf" --demangle $(TMPDIR)/enclave > $(TMPDIR)/fprintf.asm
+	${FILECHECK} --input-file $(TMPDIR)/fprintf.asm fprintf.checks
+	echo $(TMPDIR)
+
