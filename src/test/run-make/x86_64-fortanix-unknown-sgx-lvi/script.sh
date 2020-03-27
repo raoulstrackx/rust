@@ -37,12 +37,8 @@ function check {
 
 build
 
-#TODO: re-enable check when newly compiled libunwind is used
-#check unw_getcontext unw_getcontext.checks
-
-#TODO: re-enable check when newly compiled libunwind is used
-#check "libunwind::Registers_x86_64::jumpto()" jumpto.checks
-
+check unw_getcontext unw_getcontext.checks
+check "libunwind::Registers_x86_64::jumpto()" jumpto.checks
 check fprintf fprintf.checks
 check rust_plus_one_global_asm rust_plus_one_global_asm.checks || echo "warning: module level assembly currently not hardened"
 

@@ -50,7 +50,8 @@ build_libunwind() {
   build_dir=$1
   clang=$2
   clangxx=$3
-  
+  asm=$4
+
   print_header "Building libunwind"
  
   rm -rf ${build_dir} || true
@@ -59,8 +60,8 @@ build_libunwind() {
   export AR=$(which ar)
   export CC=${clang}
   export CXX=${clangxx}
-  
-  ${repo_root}/src/ci/docker/dist-various-2/build-x86_64-fortanix-unknown-sgx-toolchain.sh "800f95131fe6acd20b96b6f4723ca3c820f3d379"
+  export ASM=${asm}
+  PATH=$(dirname ${clang}):$PATH ${repo_root}/src/ci/docker/dist-various-2/build-x86_64-fortanix-unknown-sgx-toolchain.sh "6ea8f0c412376c1df942d7a77a292675489ebb37"
   popd
 
   echo "libunwind located at: ${repo_root}/libunwind-build/"
@@ -93,8 +94,15 @@ build_rustc() {
   ./configure --target="x86_64-unknown-linux-gnu,x86_64-fortanix-unknown-sgx" --prefix="${install_dir}" --disable-manage-submodules --enable-lld --disable-docs
 
   export X86_FORTANIX_SGX_LIBS=${repo_root}/libunwind-build/
-  export PATH=$PATH:${repo_root}/src/llvm-project/compile-lfence/
+  export PATH=${repo_root}/src/llvm-project/compile-lfence/:${repo_root}/clang-build/bin/:$PATH
   ${repo_root}/x.py build
+  echo "==[ Test: Assembly ]=="
+  ${repo_root}/x.py test src/test/assembly
+  echo "==[ Test: Run-Make ]=="
+  ${repo_root}/x.py test src/test/run-make
+  echo "==[ Test: All ]=="
+  ${repo_root}/x.py test
+  echo "==[ Install ]=="
   ${repo_root}/x.py install
   
   tar -cf ${repo_root}/rustc.tar ${install_dir}
@@ -105,6 +113,6 @@ build_rustc() {
 
 init_repository
 build_clang "${repo_root}/clang-build"
-build_libunwind "${repo_root}/libunwind-build" "${repo_root}/clang-build/bin/clang" "${repo_root}/clang-build/bin/clang++"
+build_libunwind "${repo_root}/libunwind-build" "${repo_root}/clang-build/bin/clang" "${repo_root}/clang-build/bin/clang++" "${repo_root}/src/llvm-project/compile-lfence/clang-lfence"
 build_rustc "${repo_root}/rust-build" "${repo_root}/clang-build/bin/clang" "${repo_root}/clang-build/bin/clang++"
 
