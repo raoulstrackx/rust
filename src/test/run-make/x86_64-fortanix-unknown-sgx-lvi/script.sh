@@ -9,10 +9,12 @@ function build {
         cp -a $TEST_DIR/enclave .
         pushd $CRATE
             echo ${WORK_DIR}
+            hardening_flags="-mlvi-hardening -mllvm -x86-lvi-load-inline-asm"
             # HACK(eddyb) sets `RUSTC_BOOTSTRAP=1` so Cargo can accept nightly features.
             # These come from the top-level Rust workspace, that this crate is not a
             # member of, but Cargo tries to load the workspace `Cargo.toml` anyway.
-            env RUSTC_BOOTSTRAP=1 CC=${S}/clang-build/bin/clang CFLAGS="-mlvi-hardening -mllvm -x86-lvi-load-inline-asm" \
+            env RUSTC_BOOTSTRAP=1 CC=${S}/clang-build/bin/clang CXX=${S}/clang-build/bin/clang++ \
+                CFLAGS="${hardening_flags}" CXXFLAGS="${hardening_flags}" \
                 $CARGO -vv run --target $TARGET
         popd
     popd
@@ -37,6 +39,8 @@ build
 #TODO: re-enable check when newly compiled libunwind is used
 #check "libunwind::Registers_x86_64::jumpto()" jumpto.checks
 
-check fprintf fprintf.checks	
+check fprintf fprintf.checks
 check cc_plus_one_c cc_plus_one_c.checks
 check cc_plus_one_c_asm cc_plus_one_c_asm.checks
+check cc_plus_one_cxx cc_plus_one_cxx.checks
+check cc_plus_one_cxx_asm cc_plus_one_cxx_asm.checks
