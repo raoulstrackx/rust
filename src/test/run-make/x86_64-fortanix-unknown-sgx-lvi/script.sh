@@ -13,8 +13,12 @@ function build {
             # HACK(eddyb) sets `RUSTC_BOOTSTRAP=1` so Cargo can accept nightly features.
             # These come from the top-level Rust workspace, that this crate is not a
             # member of, but Cargo tries to load the workspace `Cargo.toml` anyway.
-            env RUSTC_BOOTSTRAP=1 CC=${S}/clang-build/bin/clang CXX=${S}/clang-build/bin/clang++ \
-                CFLAGS="${hardening_flags}" CXXFLAGS="${hardening_flags}" \
+            env RUSTC_BOOTSTRAP=1 \
+                ASM=${S}/src/llvm-project/compile-lfence/clang-lfence \
+                CC=${S}/clang-build/bin/clang \
+                CXX=${S}/clang-build/bin/clang++ \
+                CFLAGS="${hardening_flags}" \
+                CXXFLAGS="${hardening_flags}" \
                 $CARGO -vv run --target $TARGET
         popd
     popd
@@ -46,6 +50,8 @@ check cc_plus_one_c cc_plus_one_c.checks
 check cc_plus_one_c_asm cc_plus_one_c_asm.checks
 check cc_plus_one_cxx cc_plus_one_cxx.checks
 check cc_plus_one_cxx_asm cc_plus_one_cxx_asm.checks
+check cc_plus_one_asm cc_plus_one_asm.checks || echo "warning: the cc crate forwards assembly files to the CC compiler.\
+ Clang uses its own intergrated assembler, which does not include the LVI passes."
 
 check cmake_plus_one_c cmake_plus_one_c.checks
 check cmake_plus_one_c_asm cmake_plus_one_c_asm.checks
@@ -53,6 +59,4 @@ check cmake_plus_one_c_global_asm cmake_plus_one_c_global_asm.checks || echo "wa
 check cmake_plus_one_cxx cmake_plus_one_cxx.checks
 check cmake_plus_one_cxx_asm cmake_plus_one_cxx_asm.checks
 check cmake_plus_one_cxx_global_asm cmake_plus_one_cxx_global_asm.checks || echo "warning: module level assembly currently not hardened"
-
-#WARNING clang/clang++ use an integrated assembler when given an assembly file.
-#  LVI patches are *not* applied
+check cmake_plus_one_asm cmake_plus_one_asm.checks
