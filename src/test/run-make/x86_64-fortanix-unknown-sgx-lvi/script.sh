@@ -40,8 +40,8 @@ build
 #check "libunwind::Registers_x86_64::jumpto()" jumpto.checks
 
 check fprintf fprintf.checks
-#TODO: the current passes cannot handle module level assembly!
-#  No checks are implemented
+check rust_plus_one_global_asm rust_plus_one_global_asm.checks || echo "warning: module level assembly currently not hardened"
+
 check cc_plus_one_c cc_plus_one_c.checks
 check cc_plus_one_c_asm cc_plus_one_c_asm.checks
 check cc_plus_one_cxx cc_plus_one_cxx.checks
@@ -49,8 +49,10 @@ check cc_plus_one_cxx_asm cc_plus_one_cxx_asm.checks
 
 check cmake_plus_one_c cmake_plus_one_c.checks
 check cmake_plus_one_c_asm cmake_plus_one_c_asm.checks
+check cmake_plus_one_c_global_asm cmake_plus_one_c_global_asm.checks || echo "warning: module level assembly currently not hardened"
 check cmake_plus_one_cxx cmake_plus_one_cxx.checks
 check cmake_plus_one_cxx_asm cmake_plus_one_cxx_asm.checks
+check cmake_plus_one_cxx_global_asm cmake_plus_one_cxx_global_asm.checks || echo "warning: module level assembly currently not hardened"
 
 #WARNING clang/clang++ use an integrated assembler when given an assembly file.
 #  LVI patches are *not* applied
