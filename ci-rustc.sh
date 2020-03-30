@@ -100,8 +100,6 @@ build_rustc() {
   ${repo_root}/x.py test src/test/assembly
   echo "==[ Test: Run-Make ]=="
   ${repo_root}/x.py test src/test/run-make
-  echo "==[ Test: All ]=="
-  ${repo_root}/x.py test
   echo "==[ Install ]=="
   ${repo_root}/x.py install
   
