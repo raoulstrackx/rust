@@ -53,6 +53,8 @@ pub fn target() -> Result<Target, String> {
         "EH_FRM_LEN",
         "TEXT_BASE",
         "TEXT_SIZE",
+        "UNMAPPED_BASE",
+        "UNMAPPED_SIZE",
     ];
     let opts = TargetOptions {
         dynamic_linking: false,

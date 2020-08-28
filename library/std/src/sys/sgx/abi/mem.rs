@@ -45,3 +45,29 @@ pub fn is_user_range(p: *const u8, len: usize) -> bool {
     let end = start + (len as u64);
     end <= image_base() || start >= image_base() + (unsafe { ENCLAVE_SIZE } as u64) // unsafe ok: link-time constant
 }
+
+
+extern "C" {
+    static UNMAPPED_SIZE: u64;
+}
+
+// Do not remove inline: will result in relocation failure
+// For the same reason we use inline ASM here instead of an extern static to
+// locate the base
+/// Returns the base memory address of the unmapped memory area. On platforms with SGXv2 features,
+/// this region can be used to dynamically add enclave pages
+#[inline(always)]
+#[unstable(feature = "sgx_platform", issue = "56975")]
+pub fn unmapped_base() -> u64 {
+    let base;
+    unsafe { llvm_asm!("lea UNMAPPED_BASE(%rip),$0":"=r"(base)) };
+    base
+}
+
+/// Returns the size of the unmapped memory area
+#[unstable(feature = "sgx_platform", issue = "56975")]
+pub fn unmapped_size() -> u64 {
+    unsafe {
+        UNMAPPED_SIZE
+    }
+}
