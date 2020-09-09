@@ -23,7 +23,7 @@ pub mod usercalls {
     pub mod raw {
         pub use crate::sys::abi::usercalls::raw::{
             accept_stream, alloc, async_queues, bind_stream, close, connect_stream, exit, flush,
-            free, insecure_time, launch_thread, read, read_alloc, send, wait, write,
+            free, insecure_time, launch_thread, read, read_alloc, send, wait, write, aug_enclave_memory_region,
         };
         pub use crate::sys::abi::usercalls::raw::{do_usercall, Usercalls as UsercallNrs};
 

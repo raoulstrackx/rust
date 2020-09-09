@@ -262,6 +262,12 @@ pub fn alloc(size: usize, alignment: usize) -> IoResult<*mut u8> {
 #[doc(inline)]
 pub use self::raw::free;
 
+/// Usercall `aug_enclave_memory_region` (SGXv2). See the ABI documentation for more information
+#[unstable(feature = "sgx_platform", issue = "56975")]
+pub fn aug_enclave_memory_region(page: *const u8, size: usize) -> IoResult<()> {
+    unsafe { raw::aug_enclave_memory_region(page, size).from_sgx_result() }
+}
+
 fn check_os_error(err: Result) -> i32 {
     // FIXME: not sure how to make sure all variants of Error are covered
     if err == Error::NotFound as _
