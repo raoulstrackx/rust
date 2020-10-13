@@ -179,6 +179,7 @@ impl MemoryMapper for Sgx2Mapper {
             arch::eaccept(page as _, &secinfo).map_err(|_| Error::MapFailed)?;
         }
 
+        println!("mapped {:?}:{:x}", base, size);
         Ok(())
     }
 
@@ -201,6 +202,7 @@ impl MemoryMapper for Sgx2Mapper {
         accept_trim(base, size).map_err(|_| Error::UnmapFailed)?;
         // Let the OS remove the pages
         usercalls::remove_trimmed(base, size).map_err(|_| Error::UnmapFailed)?;
+        println!("unmapped {:?}:{:x}", base, size);
         Ok(())
     }
 
