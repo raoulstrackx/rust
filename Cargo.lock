@@ -952,9 +952,8 @@ dependencies = [
 
 [[package]]
 name = "dlmalloc"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35055b1021724f4eb5262eb49130eebff23fc59fc5a14160e05faad8eeb36673"
+version = "0.2.0"
+source = "git+https://github.com/fortanix/dlmalloc-rs.git?branch=raoul/interface#e3e13054909af13a29dea68715198b16f6c97319"
 dependencies = [
  "compiler_builtins",
  "libc",
