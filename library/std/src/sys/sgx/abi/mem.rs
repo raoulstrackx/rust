@@ -17,14 +17,12 @@ extern "C" {
 }
 
 /// Returns the base memory address of the heap
-#[unstable(feature = "sgx_platform", issue = "56975")]
-pub fn heap_base() -> *const u8 {
+pub(crate) fn heap_base() -> *const u8 {
     unsafe { rel_ptr_mut(HEAP_BASE) }
 }
 
 /// Returns the size of the heap
-#[unstable(feature = "sgx_platform", issue = "56975")]
-pub fn heap_size() -> usize {
+pub(crate) fn heap_size() -> usize {
     unsafe { HEAP_SIZE }
 }
 
