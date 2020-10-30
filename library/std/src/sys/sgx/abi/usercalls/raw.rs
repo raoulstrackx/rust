@@ -5,6 +5,8 @@ pub use fortanix_sgx_abi::*;
 
 use crate::num::NonZeroU64;
 use crate::ptr::NonNull;
+use core::convert::TryFrom;
+use sgx_isa::PageType;
 
 #[repr(C)]
 struct UsercallReturn(u64, u64);
@@ -127,6 +129,16 @@ impl<T: RegisterArgument> RegisterArgument for Option<NonNull<T>> {
     }
     fn into_register(self) -> Register {
         self.map_or(0 as _, NonNull::as_ptr) as _
+    }
+}
+
+impl RegisterArgument for PageType {
+    fn from_register(reg: Register) -> Self {
+        PageType::try_from(reg as u8).unwrap_or(PageType::Reg)
+    }
+
+    fn into_register(self) -> Register {
+        self as _
     }
 }
 

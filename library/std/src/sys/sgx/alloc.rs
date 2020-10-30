@@ -19,13 +19,13 @@ use sgx_isa::{PageType, Secinfo, SecinfoFlags};
 // dlmalloc.c from C to Rust.
 #[cfg_attr(test, linkage = "available_externally")]
 #[export_name = "_ZN16__rust_internals3std3sys3sgx5alloc8DLMALLOCE"]
-static DLMALLOC: SpinMutex<dlmalloc::Dlmalloc<Sgx>> = SpinMutex::new(dlmalloc::Dlmalloc::new());
+static DLMALLOC: SpinMutex<dlmalloc::Dlmalloc<Sgx>> = SpinMutex::new(dlmalloc::Dlmalloc::new_with_platform(Sgx));
 
 /// System interface implementation for SGX platform
-struct Sgx;
+pub struct Sgx;
 
 impl Sgx {
-    const PAGE_SIZE: usize = 0x1000;
+    pub const PAGE_SIZE: usize = 0x1000;
 
     unsafe fn allocator() -> &'static mut SGXv2Allocator {
         static mut SGX2_ALLOCATOR: SGXv2Allocator = SGXv2Allocator::new();
@@ -33,9 +33,15 @@ impl Sgx {
     }
 }
 
-impl dlmalloc::System for Sgx {
+pub(crate) fn alloc_guarded_area(size: usize, guard_size: isize) -> Option<*mut u8> {
+    //TODO needs a SpinMutex
+    let ptr = unsafe { Sgx::allocator().alloc(&DataMapper::guarded(guard_size), size + 2 * guard_size as usize) };
+    ptr
+}
+
+unsafe impl dlmalloc::System for Sgx {
     /// Allocs system resources
-    unsafe fn alloc(size: usize) -> (*mut u8, usize, u32) {
+    fn alloc(&self, size: usize) -> (*mut u8, usize, u32) {
         static INIT: AtomicBool = AtomicBool::new(false);
         if size <= sgx_mem::heap_size() {
             // No ordering requirement since this function is protected by the global lock.
@@ -44,39 +50,39 @@ impl dlmalloc::System for Sgx {
             }
         }
 
-        match unsafe { Sgx::allocator().alloc(size) } {
+        match unsafe { Sgx::allocator().alloc(&DataMapper::new(), size) } {
             Some(base) => (base, size, 0),
             None => (ptr::null_mut(), 0, 0),
         }
     }
 
-    unsafe fn remap(_ptr: *mut u8, _oldsize: usize, _newsize: usize, _can_move: bool) -> *mut u8 {
+    fn remap(&self, _ptr: *mut u8, _oldsize: usize, _newsize: usize, _can_move: bool) -> *mut u8 {
         ptr::null_mut()
     }
 
-    unsafe fn free_part(ptr: *mut u8, oldsize: usize, newsize: usize) -> bool {
+    fn free_part(&self, ptr: *mut u8, oldsize: usize, newsize: usize) -> bool {
         assert_eq!(oldsize % Sgx::PAGE_SIZE, 0);
         assert_eq!(newsize % Sgx::PAGE_SIZE, 0);
-        unsafe { Sgx::allocator().free_part(ptr, oldsize, newsize).is_ok() }
+        unsafe { Sgx::allocator().free_part(&DataMapper::new(), ptr, oldsize, newsize).is_ok() }
     }
 
-    unsafe fn free(ptr: *mut u8, size: usize) -> bool {
+    fn free(&self, ptr: *mut u8, size: usize) -> bool {
         if !sgx_mem::is_unmapped_range(ptr, size) {
             return false;
         }
         assert_eq!(size % Sgx::PAGE_SIZE, 0);
-        unsafe { Sgx::allocator().free(ptr, size).is_ok() }
+        unsafe { Sgx::allocator().free(&DataMapper::new(), ptr, size).is_ok() }
     }
 
-    fn can_release_part(_flags: u32) -> bool {
+    fn can_release_part(&self, _flags: u32) -> bool {
         true
     }
 
-    fn allocates_zeros() -> bool {
+    fn allocates_zeros(&self) -> bool {
         false
     }
 
-    fn page_size() -> usize {
+    fn page_size(&self) -> usize {
         Sgx::PAGE_SIZE
     }
 }
@@ -134,56 +140,112 @@ impl SGXv2Allocator {
         if self.0.is_none() {
             let region_base = sgx_mem::unmapped_base();
             let region_size = sgx_mem::unmapped_size();
-            self.0 =
-                Some(BuddyAllocator::new(region_base as _, region_size as _, Sgx::PAGE_SIZE).unwrap());
+            self.0 = Some(
+                BuddyAllocator::new(region_base as _, region_size as _, Sgx::PAGE_SIZE).unwrap(),
+            );
         }
         self.0.as_mut().unwrap()
     }
 
-    pub unsafe fn alloc(&mut self, size: usize) -> Option<*mut u8> {
-        self.allocator().alloc::<Sgx2Mapper>(size).ok()
+    pub unsafe fn alloc<M: MemoryMapper>(&mut self, mapper: &M, size: usize) -> Option<*mut u8> {
+        self.allocator().alloc(mapper, size).ok()
     }
 
-    pub unsafe fn free(&mut self, ptr: *mut u8, size: usize) -> Result<(), Error> {
-        self.allocator().free::<Sgx2Mapper>(ptr, size, 0)
-    }
-
-    pub unsafe fn free_part(
+    pub unsafe fn free<M: MemoryMapper>(
         &mut self,
+        mapper: &M,
+        ptr: *mut u8,
+        size: usize,
+    ) -> Result<(), Error> {
+        self.allocator().free(mapper, ptr, size, 0)
+    }
+
+    pub unsafe fn free_part<M: MemoryMapper>(
+        &mut self,
+        mapper: &M,
         ptr: *mut u8,
         old_size: usize,
         new_size: usize,
     ) -> Result<(), Error> {
-        self.allocator().free::<Sgx2Mapper>(ptr, old_size, new_size)
+        self.allocator().free(mapper, ptr, old_size, new_size)
     }
 }
 
-struct Sgx2Mapper;
+/// A memory mapper that maps pages with RW access rights in memory. An area of `guarded_size`
+/// bytes will remain unmapped at both ends of allocated memory. When the sum of both guard areas
+/// is larger than the allocated memory region, no physical memory will be mapped.
+#[derive(Debug, Clone)]
+struct DataMapper {
+    guard_size: isize
+}
 
-impl MemoryMapper for Sgx2Mapper {
-    fn map_region(base: *const u8, size: usize) -> Result<(), Error> {
-        assert_eq!(size % Sgx::PAGE_SIZE, 0);
-        let flags = SecinfoFlags::from(PageType::Reg)
-            | SecinfoFlags::R
-            | SecinfoFlags::W
-            | SecinfoFlags::PENDING;
-        let secinfo = Secinfo::from(flags).into();
-        for offset in (0..size as isize).step_by(Sgx::PAGE_SIZE) {
-            let page = unsafe { base.offset(offset) };
-
-            // In order to add a new page, the OS needs to issue an `eaug` instruction, after which the enclave
-            // needs to accept the changes with an `eaccept`. The sgx driver at time of writing only issues an `eaug`
-            // when a #PF within the enclave occured due to unmapped memory. By issuing an `eaccept` on
-            // unmapped memory, we force such a #PF. Eventually the `eaccept` instruction will be
-            // re-executed and succeed.
-            arch::eaccept(page as _, &secinfo).map_err(|_| Error::MapFailed)?;
+impl DataMapper {
+    fn new() -> DataMapper {
+        DataMapper {
+            guard_size: 0
         }
-
-        println!("mapped {:?}:{:x}", base, size);
-        Ok(())
     }
 
-    fn unmap_region(base: *const u8, size: usize) -> Result<(), Error> {
+    fn guarded(guard_size: isize) -> DataMapper {
+        let guard_size = if guard_size < 0 {
+            0
+        } else {
+            Self::round_up(guard_size)
+        };
+        DataMapper {
+            guard_size,
+        }
+    }
+
+    fn round_up(size: isize) -> isize {
+        let page_size: isize = Self::page_size() as _;
+        match size & (page_size - 1) {   
+            0 => size,
+            remainder => size + (page_size - remainder),
+        }
+    }
+
+    /// Computes the net memory area; the memory area without the two guards
+    fn mapped_area(&self, base: *const u8, size: usize) -> Option<(*const u8, usize)> {
+        if size <= (2 * self.guard_size) as usize {
+            // Guard areas are larger than the allocated area. Don't map anything in memory
+            None
+        } else {
+            let base = unsafe{ base.offset(self.guard_size) };
+            let size = size - 2 * self.guard_size as usize;
+            Some((base, size))
+        }
+    }
+}
+
+impl MemoryMapper for DataMapper {
+    fn map_region(&self, base: *const u8, size: usize) -> Result<(), Error> {
+        match self.mapped_area(base, size) {
+            Some((base, size)) => {
+                assert_eq!(size % Sgx::PAGE_SIZE, 0);
+                let flags = SecinfoFlags::from(PageType::Reg)
+                    | SecinfoFlags::R
+                    | SecinfoFlags::W
+                    | SecinfoFlags::PENDING;
+                let secinfo = Secinfo::from(flags).into();
+                for offset in (0..(size as isize)).step_by(Sgx::PAGE_SIZE) {
+                    let page = unsafe { base.offset(offset) };
+
+                    // In order to add a new page, the OS needs to issue an `eaug` instruction, after which the enclave
+                    // needs to accept the changes with an `eaccept`. The sgx driver at time of writing only issues an `eaug`
+                    // when a #PF within the enclave occured due to unmapped memory. By issuing an `eaccept` on
+                    // unmapped memory, we force such a #PF. Eventually the `eaccept` instruction will be
+                    // re-executed and succeed.
+                    arch::eaccept(page as _, &secinfo).map_err(|_| Error::MapFailed)?;
+                }
+
+                Ok(())
+            }
+            None => Ok(())
+        }
+    }
+
+    fn unmap_region(&self, base: *const u8, size: usize) -> Result<(), Error> {
         fn accept_trim(base: *const u8, size: usize) -> Result<(), Error> {
             let flags = SecinfoFlags::from(PageType::Trim) | SecinfoFlags::MODIFIED;
             let secinfo = Secinfo::from(flags).into();
@@ -195,15 +257,19 @@ impl MemoryMapper for Sgx2Mapper {
             Ok(())
         }
 
-        assert_eq!(size % Sgx::PAGE_SIZE, 0);
-        // Signal to OS that pages are no longer used and should be trimmed
-        usercalls::trim(base, size).map_err(|_| Error::UnmapFailed)?;
-        // Accept removing of pages
-        accept_trim(base, size).map_err(|_| Error::UnmapFailed)?;
-        // Let the OS remove the pages
-        usercalls::remove_trimmed(base, size).map_err(|_| Error::UnmapFailed)?;
-        println!("unmapped {:?}:{:x}", base, size);
-        Ok(())
+        match self.mapped_area(base, size) {
+            Some((base, size)) => {
+                assert_eq!(size % Sgx::PAGE_SIZE, 0);
+                // Signal to OS that pages are no longer used and should be trimmed
+                usercalls::change_memory_type(base, size, PageType::Trim).map_err(|_| Error::UnmapFailed)?;
+                // Accept removing of pages
+                accept_trim(base, size).map_err(|_| Error::UnmapFailed)?;
+                // Let the OS remove the pages
+                usercalls::remove_trimmed(base, size).map_err(|_| Error::UnmapFailed)?;
+                Ok(())
+            }
+            None => Ok(())
+        }
     }
 
     fn page_size() -> usize {
@@ -227,30 +293,35 @@ pub enum Error {
 }
 
 pub trait MemoryMapper {
-    fn map_region(base: *const u8, size: usize) -> Result<(), Error>;
+    fn map_region(&self, base: *const u8, size: usize) -> Result<(), Error>;
 
-    fn unmap_region(base: *const u8, size: usize) -> Result<(), Error>;
+    fn unmap_region(&self, base: *const u8, size: usize) -> Result<(), Error>;
 
     fn page_size() -> usize;
 }
 
 /// A small, simple allocator that can only allocate blocks of a pre-determined, specific size.
 #[derive(Debug, PartialEq, Eq)]
-pub struct SimpleAllocator<T> {
+pub struct SimpleAllocator<T, M: MemoryMapper> {
     memory: Region,
     free_blocks: *mut u8,
     next_uninit_block: *mut u8,
+    mapper: M,
     phantom: PhantomData<T>,
 }
 
-impl<T> SimpleAllocator<T> {
+impl<T, M: MemoryMapper> SimpleAllocator<T, M> {
     pub fn block_size() -> usize {
         let t_size = mem::size_of::<T>();
         let p_size = mem::size_of::<*mut u8>();
         cmp::max(t_size, p_size).next_power_of_two()
     }
 
-    pub fn new(memory_base: usize, memory_size: usize) -> Result<SimpleAllocator<T>, Error> {
+    pub fn new(
+        mapper: M,
+        memory_base: usize,
+        memory_size: usize,
+    ) -> Result<SimpleAllocator<T, M>, Error> {
         if memory_base % Self::block_size() != 0 {
             return Err(Error::AlignmentError);
         }
@@ -258,11 +329,12 @@ impl<T> SimpleAllocator<T> {
             memory: Region { addr: memory_base as _, size: memory_size },
             next_uninit_block: memory_base as _,
             free_blocks: ptr::null_mut(),
+            mapper,
             phantom: PhantomData,
         })
     }
 
-    pub fn alloc<M: MemoryMapper>(&mut self, content: T) -> Result<*mut T, Error> {
+    pub fn alloc(&mut self, content: T) -> Result<*mut T, Error> {
         if (self.memory.addr as usize) % M::page_size() != 0
             || M::page_size() % Self::block_size() != 0
         {
@@ -277,7 +349,7 @@ impl<T> SimpleAllocator<T> {
                     // uninitialized; use a new uninitialized block
                     if (ptr as usize) % M::page_size() == 0 {
                         // Request that a new page is mapped in memory
-                        M::map_region(ptr as _, M::page_size())?;
+                        self.mapper.map_region(ptr as _, M::page_size())?;
                     }
                     self.next_uninit_block =
                         (self.next_uninit_block as usize + Self::block_size()) as *mut u8;
@@ -334,7 +406,7 @@ pub struct BuddyAllocator {
     block: *mut Block,
     min_block_size: usize,
     memory: Region,
-    allocator: SimpleAllocator<Block>,
+    allocator: SimpleAllocator<Block, DataMapper>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -427,7 +499,7 @@ impl BuddyAllocator {
         // The algorithm sometimes temporarily uses 1 additional allocation, we need to account for
         // that
         (Self::max_metadata_entries(memory_size, min_block_size) as usize + 1)
-            * SimpleAllocator::<Block>::block_size()
+            * SimpleAllocator::<Block, DataMapper>::block_size()
     }
 
     pub fn new(
@@ -449,24 +521,34 @@ impl BuddyAllocator {
         }
 
         let allocator = SimpleAllocator::new(
+            DataMapper::new(),
             memory_base,
             Self::max_metadata_size(memory_size, min_block_size).next_power_of_two(),
         )?;
-        let buddy = BuddyAllocator {
+        let mut buddy = BuddyAllocator {
             block: ptr::null_mut(),
             min_block_size,
             memory: Region::new(memory_base as _, memory_size),
             allocator,
         };
+
+        // Reserve space for own book keeping
+        buddy.block = buddy.allocator.alloc(Block::Free)?;
+        let _metadata_area = unsafe {
+            buddy.alloc_ex(
+                buddy.memory.to_owned(),
+                buddy.block,
+                Self::max_metadata_size(buddy.memory.size, buddy.min_block_size),
+            )
+        }?;
         Ok(buddy)
     }
 
-    unsafe fn alloc_ex<M: MemoryMapper>(
+    unsafe fn alloc_ex(
         &mut self,
         memory: Region,
         block: *mut Block,
         alloc_size: usize,
-        map_memory: bool,
     ) -> Result<Region, Error> {
         unsafe {
             assert!(self.min_block_size <= memory.size);
@@ -478,10 +560,10 @@ impl BuddyAllocator {
                 Block::Free => {
                     if 2 * alloc_size <= memory.size && self.min_block_size * 2 <= memory.size {
                         // Very large free block found, split region recursively
-                        let left = self.allocator.alloc::<M>(Block::Free)?;
-                        let right = self.allocator.alloc::<M>(Block::Free)?;
+                        let left = self.allocator.alloc(Block::Free)?;
+                        let right = self.allocator.alloc(Block::Free)?;
                         *block = Block::Partitioned(left, right);
-                        self.alloc_ex::<M>(memory, block, alloc_size, map_memory)
+                        self.alloc_ex(memory, block, alloc_size)
                     } else {
                         // Small free block is found. May split it up further to reduce internal fragmentation
                         if (memory.size - alloc_size) < self.min_block_size
@@ -489,26 +571,20 @@ impl BuddyAllocator {
                         {
                             // Use entire region
                             ptr::write(block, Block::Allocated);
-                            if map_memory {
-                                // Don't map metadata in memory. The SimpleAllocator will take care of
-                                // that
-                                M::map_region(memory.addr, memory.size)?;
-                            }
                             Ok(memory)
                         } else {
                             // Split block
-                            let block_left = self.allocator.alloc::<M>(Block::Free)?;
-                            let block_right = self.allocator.alloc::<M>(Block::Free)?;
+                            let block_left = self.allocator.alloc(Block::Free)?;
+                            let block_right = self.allocator.alloc(Block::Free)?;
                             ptr::write(block, Block::Partitioned(block_left, block_right));
                             let (memory_left, memory_right) = memory.split();
                             let left_size = memory_left.size;
                             let alloc_left =
-                                self.alloc_ex::<M>(memory_left, block_left, left_size, map_memory)?;
-                            let alloc_right = self.alloc_ex::<M>(
+                                self.alloc_ex(memory_left, block_left, left_size)?;
+                            let alloc_right = self.alloc_ex(
                                 memory_right,
                                 block_right,
                                 alloc_size - alloc_left.size,
-                                map_memory,
                             )?;
                             // `alloc_left` should have received a complete block. `alloc_right` will
                             // only receive a chunk of the available mememory but as we favor the
@@ -521,12 +597,10 @@ impl BuddyAllocator {
                 }
                 Block::Partitioned(block_left, block_right) => {
                     let (memory_left, memory_right) = memory.split();
-                    if let Ok(left) =
-                        self.alloc_ex::<M>(memory_left, block_left, alloc_size, map_memory)
-                    {
+                    if let Ok(left) = self.alloc_ex(memory_left, block_left, alloc_size) {
                         Ok(left)
                     } else if let Ok(right) =
-                        self.alloc_ex::<M>(memory_right, block_right, alloc_size, map_memory)
+                        self.alloc_ex(memory_right, block_right, alloc_size)
                     {
                         Ok(right)
                     } else {
@@ -538,29 +612,19 @@ impl BuddyAllocator {
         }
     }
 
-    pub fn alloc<M: MemoryMapper>(&mut self, size: usize) -> Result<*mut u8, Error> {
+    pub fn alloc<M: MemoryMapper>(&mut self, mapper: &M, size: usize) -> Result<*mut u8, Error> {
         if self.min_block_size < M::page_size() {
             return Err(Error::MinBlockSizeTooSmall);
         }
-        if self.block.is_null() {
-            // Reserve space for own book keeping
-            self.block = self.allocator.alloc::<M>(Block::Free)?;
-            let metadata = unsafe {
-                self.alloc_ex::<M>(
-                    self.memory.to_owned(),
-                    self.block,
-                    Self::max_metadata_size(self.memory.size, self.min_block_size),
-                    false,
-                )
-            };
-            assert!(metadata.is_ok());
+        if self.min_block_size % M::page_size() != 0 {
+            return Err(Error::SizeNotSupported);
         }
-
-        let region = unsafe { self.alloc_ex::<M>(self.memory.to_owned(), self.block, size, true)? };
+        let region = unsafe { self.alloc_ex(self.memory.to_owned(), self.block, size)? };
+        mapper.map_region(region.addr, region.size)?;
         Ok(region.addr)
     }
 
-    unsafe fn free_ex<M: MemoryMapper>(
+    unsafe fn free_ex(
         &mut self,
         block: *mut Block,
         memory: &Region,
@@ -572,41 +636,29 @@ impl BuddyAllocator {
                     if let Some(_alloc) = memory.subtract(free) {
                         // Split block into two allocated regions and continue freeing recursively
                         assert_eq!(_alloc.addr, memory.addr);
-                        let left = self.allocator.alloc::<M>(Block::Allocated)?;
-                        let right = self.allocator.alloc::<M>(Block::Allocated)?;
+                        let left = self.allocator.alloc(Block::Allocated)?;
+                        let right = self.allocator.alloc(Block::Allocated)?;
                         *block = Block::Partitioned(left, right);
-                        self.free_ex::<M>(block, memory, free)
+                        self.free_ex(block, memory, free)
                     } else {
                         // Free entire memory block
                         ptr::write(block, Block::Free);
-                        if M::page_size() < memory.size {
-                            M::unmap_region(memory.addr, memory.size)?;
-                        }
                         Ok(())
                     }
                 }
                 Block::Partitioned(block_left, block_right) => {
                     let (memory_left, memory_right) = memory.split();
                     if let Some(overlap) = memory_right.intersect(free) {
-                        self.free_ex::<M>(block_right, &memory_right, &overlap)?;
+                        self.free_ex(block_right, &memory_right, &overlap)?;
                     }
                     if let Some(overlap) = memory_left.intersect(free) {
-                        self.free_ex::<M>(block_left, &memory_left, &overlap)?;
+                        self.free_ex(block_left, &memory_left, &overlap)?;
                     }
                     if ptr::read(block_left) == Block::Free && ptr::read(block_right) == Block::Free
                     {
                         self.allocator.free(block_left);
                         self.allocator.free(block_right);
                         ptr::write(block, Block::Free);
-                        if M::page_size() == memory.size {
-                            // The left and right parts combined are exactly one page. At a lower
-                            // level, it couldn't be unmapped as there still may be data on that
-                            // page. Now the entire page is free, unmap it. It also isn't possible
-                            // that the block size is larger than a page as the buddy allocator
-                            // always halfs the available memory. If the block now spans two pages,
-                            // it would already have been unmapped on a lower level
-                            M::unmap_region(memory.addr, memory.size)?;
-                        }
                     }
                     Ok(())
                 }
@@ -617,6 +669,7 @@ impl BuddyAllocator {
 
     pub fn free<M: MemoryMapper>(
         &mut self,
+        mapper: &M,
         ptr: *mut u8,
         old_size: usize,
         new_size: usize,
@@ -638,7 +691,9 @@ impl BuddyAllocator {
         let new_alloc = Region::new(ptr, new_size);
         let free = old_alloc.subtract(&new_alloc).ok_or(Error::SizeNotSupported)?;
         let memory = self.memory.to_owned();
-        unsafe { self.free_ex::<M>(self.block, &memory, &free) }
+        unsafe { self.free_ex(self.block, &memory, &free)? }
+        mapper.unmap_region(memory.addr, memory.size)?;
+        Ok(())
     }
 }
 

@@ -3,6 +3,7 @@ use crate::convert::TryFrom;
 use crate::io::{Error as IoError, ErrorKind, IoSlice, IoSliceMut, Result as IoResult};
 use crate::sys::rand::rdrand64;
 use crate::time::{Duration, Instant};
+use sgx_isa::PageType;
 
 pub(crate) mod alloc;
 #[macro_use]
@@ -259,20 +260,20 @@ pub fn alloc(size: usize, alignment: usize) -> IoResult<*mut u8> {
     unsafe { raw::alloc(size, alignment).from_sgx_result() }
 }
 
-/// Usercall `trim`. See the ABI documentation for more information.
-#[unstable(feature = "sgx_platform", issue = "56975")]
-pub fn trim(region: *const u8, size: usize) -> IoResult<()> {
-    unsafe {
-        raw::trim(region, size).from_sgx_result()?;
-        Ok(())
-    }
-}
-
 /// Usercall `remove_trimmed`. See the ABI documentation for more information.
 #[unstable(feature = "sgx_platform", issue = "56975")]
 pub fn remove_trimmed(region: *const u8, size: usize) -> IoResult<()> {
     unsafe {
         raw::remove_trimmed(region, size).from_sgx_result()?;
+        Ok(())
+    }
+}
+
+/// Usercall `change_memory_type`. See the ABI documentation for more information.
+#[unstable(feature = "sgx_platform", issue = "56975")]
+pub fn change_memory_type(region: *const u8, size: usize, page_type: PageType) -> IoResult<()> {
+    unsafe {
+        raw::change_memory_type(region, size, page_type).from_sgx_result()?;
         Ok(())
     }
 }

@@ -81,6 +81,22 @@ pub fn unmapped_size() -> u64 {
     unsafe { UNMAPPED_SIZE }
 }
 
+/// Returns the base memory address of the entry code
+#[unstable(feature = "sgx_platform", issue = "56975")]
+#[inline(always)]
+pub fn enclave_entry() -> u64 {
+    let base: u64;
+    unsafe {
+        asm!(
+            "lea sgx_entry(%rip), {}",
+            lateout(reg) base,
+            // NOTE(#76738): ATT syntax is used to support LLVM 8 and 9.
+            options(att_syntax, nostack, preserves_flags, nomem, pure),
+        )
+    };
+    base
+}
+
 /// Returns whether the pointer is part of the unmapped memory range
 /// `p + len` must not overflow
 #[unstable(feature = "sgx_platform", issue = "56975")]

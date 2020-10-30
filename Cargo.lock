@@ -955,7 +955,7 @@ dependencies = [
 [[package]]
 name = "dlmalloc"
 version = "0.2.0"
-source = "git+https://github.com/fortanix/dlmalloc-rs.git?branch=raoul/interface#e3e13054909af13a29dea68715198b16f6c97319"
+source = "git+https://github.com/fortanix/dlmalloc-rs.git?branch=raoul/interface#c798baf4bbedcabf7ac83014b31c45015f08dc1d"
 dependencies = [
  "compiler_builtins",
  "libc",

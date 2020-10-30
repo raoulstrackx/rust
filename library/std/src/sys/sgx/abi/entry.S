@@ -60,6 +60,10 @@ IMAGE_BASE:
     globvar CFGDATA_BASE 8
     /*  Non-zero if debugging is enabled, zero otherwise */
     globvar DEBUG 1
+    /*  The SGX version this enclave was build for */
+    globvar SGX_VERSION 1
+    /*  The number of SSA frames that should be used when a new, dynamic thread is started (SGXv2) */
+    globvar NSSA 1
     /*  The base address (relative to enclave start) of the enclave text section */
     globvar TEXT_BASE 8
     /*  The size in bytes of enclacve text section */

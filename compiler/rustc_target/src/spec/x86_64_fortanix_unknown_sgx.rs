@@ -56,6 +56,8 @@ pub fn target() -> Target {
         "TCS_LIST",
         "UNMAPPED_BASE",
         "UNMAPPED_SIZE",
+        "SGX_VERSION",
+        "NSSA",
     ];
     let opts = TargetOptions {
         dynamic_linking: false,

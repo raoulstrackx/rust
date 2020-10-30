@@ -103,3 +103,28 @@ pub(super) fn exit_with_code(code: isize) -> ! {
 extern "C" fn abort_reentry() -> ! {
     usercalls::exit(false)
 }
+
+extern "C" {
+    static SGX_VERSION: u8;
+    static NSSA: u8;
+}
+
+pub enum SgxVersion {
+    SGXv1 = 1,
+    SGXv2 = 2,
+}
+
+/// Returns the SGX version this enclave was build for
+pub(crate) fn sgx_version() -> SgxVersion {
+    println!("sgx_version: {}", unsafe { SGX_VERSION });
+    match unsafe { SGX_VERSION } {
+        1 => SgxVersion::SGXv1,
+        2 => SgxVersion::SGXv2,
+        _ => panic!("Unexpected SGX version"),
+    }
+}
+
+/// Returns the number of SSA frames that should be used when creating new, dynamic threads
+pub(crate) fn nssa() -> u8 {
+    unsafe { NSSA }
+}
