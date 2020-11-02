@@ -8,8 +8,11 @@ use crate::ptr;
 use crate::sys::sgx::abi::{mem as sgx_mem, usercalls};
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use super::waitqueue::SpinMutex;
+use super::waitqueue::{SpinMutex, SpinMutexGuard};
 use sgx_isa::{PageType, Secinfo, SecinfoFlags};
+
+/// System interface implementation for SGX platform
+pub struct Sgx;
 
 // Using a SpinMutex because we never want to exit the enclave waiting for the
 // allocator.
@@ -21,22 +24,55 @@ use sgx_isa::{PageType, Secinfo, SecinfoFlags};
 #[export_name = "_ZN16__rust_internals3std3sys3sgx5alloc8DLMALLOCE"]
 static DLMALLOC: SpinMutex<dlmalloc::Dlmalloc<Sgx>> = SpinMutex::new(dlmalloc::Dlmalloc::new_with_platform(Sgx));
 
-/// System interface implementation for SGX platform
-pub struct Sgx;
+#[derive(PartialEq, Eq, Debug)]
+pub(crate) struct MemoryArea {
+    addr: *mut u8,
+    guard_size: usize,
+    mapped_size: usize,
+}
+
+impl Drop for MemoryArea {
+    fn drop(&mut self) {
+        if !self.addr.is_null() {
+            unsafe {
+                let mapper = DataMapper::guarded(self.guard_size);
+                Sgx::allocator().free(&mapper, self.guard0(), self.mapped_size + 2 * self.guard_size).expect("Free failed")
+            }
+        }
+    }
+}
+
+impl MemoryArea {
+    pub fn guard0(&self) -> *mut u8 {
+        self.addr
+    }
+
+    pub fn start(&self) -> *mut u8 {
+        unsafe { self.addr.offset(self.guard_size as _) }
+    }
+
+    pub fn end(&self) -> *mut u8 {
+        unsafe { self.addr.offset(self.guard_size as isize + self.mapped_size as isize) }
+    }
+}
 
 impl Sgx {
     pub const PAGE_SIZE: usize = 0x1000;
 
-    unsafe fn allocator() -> &'static mut SGXv2Allocator {
-        static mut SGX2_ALLOCATOR: SGXv2Allocator = SGXv2Allocator::new();
-        unsafe { &mut SGX2_ALLOCATOR }
+    unsafe fn allocator() -> SpinMutexGuard<'static, SGXv2Allocator> {
+        static SGX2_ALLOCATOR: SpinMutex<SGXv2Allocator> = SpinMutex::new(SGXv2Allocator::new());
+        SGX2_ALLOCATOR.lock()
     }
-}
 
-pub(crate) fn alloc_guarded_area(size: usize, guard_size: isize) -> Option<*mut u8> {
-    //TODO needs a SpinMutex
-    let ptr = unsafe { Sgx::allocator().alloc(&DataMapper::guarded(guard_size), size + 2 * guard_size as usize) };
-    ptr
+    pub(crate) fn alloc_guarded_area(size: usize, guard_size: usize) -> Option<MemoryArea> {
+        let guard_size = DataMapper::calc_guard_size(guard_size);
+        let ptr = unsafe { Self::allocator().alloc(&DataMapper::guarded(guard_size), size + 2 * guard_size) }?;
+        Some(MemoryArea {
+            addr: ptr,
+            guard_size,
+            mapped_size: size,
+        })
+    }
 }
 
 unsafe impl dlmalloc::System for Sgx {
@@ -176,32 +212,28 @@ impl SGXv2Allocator {
 /// is larger than the allocated memory region, no physical memory will be mapped.
 #[derive(Debug, Clone)]
 struct DataMapper {
-    guard_size: isize
+    guard_size: usize
 }
 
 impl DataMapper {
+    fn calc_guard_size(guard_size: usize) -> usize {
+        let page_size = Self::page_size();
+        match guard_size & (page_size - 1) {
+            0 => guard_size,
+            remainder => guard_size + (page_size - remainder),
+        }
+    }
+
     fn new() -> DataMapper {
         DataMapper {
             guard_size: 0
         }
     }
 
-    fn guarded(guard_size: isize) -> DataMapper {
-        let guard_size = if guard_size < 0 {
-            0
-        } else {
-            Self::round_up(guard_size)
-        };
+    fn guarded(guard_size: usize) -> DataMapper {
+        let guard_size = Self::calc_guard_size(guard_size);
         DataMapper {
             guard_size,
-        }
-    }
-
-    fn round_up(size: isize) -> isize {
-        let page_size: isize = Self::page_size() as _;
-        match size & (page_size - 1) {   
-            0 => size,
-            remainder => size + (page_size - remainder),
         }
     }
 
@@ -211,7 +243,7 @@ impl DataMapper {
             // Guard areas are larger than the allocated area. Don't map anything in memory
             None
         } else {
-            let base = unsafe{ base.offset(self.guard_size) };
+            let base = unsafe{ base.offset(self.guard_size as isize) };
             let size = size - 2 * self.guard_size as usize;
             Some((base, size))
         }
@@ -692,7 +724,7 @@ impl BuddyAllocator {
         let free = old_alloc.subtract(&new_alloc).ok_or(Error::SizeNotSupported)?;
         let memory = self.memory.to_owned();
         unsafe { self.free_ex(self.block, &memory, &free)? }
-        mapper.unmap_region(memory.addr, memory.size)?;
+        mapper.unmap_region(free.addr, free.size)?;
         Ok(())
     }
 }

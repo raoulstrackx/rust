@@ -273,7 +273,10 @@ pub fn remove_trimmed(region: *const u8, size: usize) -> IoResult<()> {
 #[unstable(feature = "sgx_platform", issue = "56975")]
 pub fn change_memory_type(region: *const u8, size: usize, page_type: PageType) -> IoResult<()> {
     unsafe {
-        raw::change_memory_type(region, size, page_type).from_sgx_result()?;
+        println!("calling enclave runner: change memory type: {:?}:{:x} to {:?}", region, size, page_type);
+        let r = raw::change_memory_type(region, size, page_type);
+        println!("driver returned: {:?}", r);
+        r.from_sgx_result()?;
         Ok(())
     }
 }

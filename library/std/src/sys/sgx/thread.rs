@@ -1,14 +1,13 @@
 #![cfg_attr(test, allow(dead_code))] // why is this necessary?
-use fortanix_sgx_abi::tls::{Tls, TlsFlags};
+use fortanix_sgx_abi::tcsls::{Tcsls, TcslsFlags};
 use super::ext::arch;
 use crate::ffi::CStr;
 use crate::io;
 use crate::os::fortanix_sgx::mem::enclave_entry;
-use crate::sys::alloc::{self, Sgx};
-use crate::sys::sgx::abi::{self, SgxVersion};
+use crate::sys::alloc::{self, Sgx, MemoryArea};
+use crate::sys::sgx::abi;
 use crate::sys::sgx::abi::mem as sgx_mem;
 use crate::time::Duration;
-use core::alloc::Layout;
 use core::convert::TryInto;
 use core::mem;
 use sgx_isa::{PageType, Secinfo, SecinfoFlags, Tcs};
@@ -20,27 +19,62 @@ pub struct Thread {
     handle: task_queue::JoinHandle,
 }
 
+#[derive(Debug)]
+pub struct ThreadResources {
+    stack: MemoryArea,
+    ssa: MemoryArea,
+    tcsls: MemoryArea,
+    tcs: MemoryArea,
+}
+
+mod thread_destructor {
+    use super::ThreadResources;
+    use crate::sync::{Mutex, Once};
+
+    static mut STOPPED_THREAD_INIT: Once = Once::new();
+    static mut STOPPED_THREAD: Option<Mutex<Option<ThreadResources>>> = None;
+
+    pub fn destruct_thread_resources(resources: ThreadResources) {
+        unsafe {
+            STOPPED_THREAD_INIT.call_once(|| STOPPED_THREAD = Some(Mutex::new(None)));
+            let mut last_resources = STOPPED_THREAD.as_ref().unwrap().lock().unwrap();
+            *last_resources = Some(resources)
+        }
+    }
+}
+
 pub const DEFAULT_MIN_STACK_SIZE: usize = 2 * 1024 * 1024;
-const DEFAULT_STACK_GUARD_SIZE: isize = 0x10000;
+const DEFAULT_STACK_GUARD_SIZE: usize = 0x10000;
 
 mod tcs_queue {
+    use super::thread_destructor;
+    use super::super::abi::{self, SgxVersion};
     use super::super::abi::mem as sgx_mem;
     use super::super::abi::thread;
+    use crate::sys::thread::Thread;
     use crate::ptr::NonNull;
     use crate::sync::{Mutex, MutexGuard, Once};
+    use crate::sys::thread::ThreadResources;
 
-    #[derive(Clone, PartialEq, Eq, Debug)]
-    pub(super) struct Tcs {
-        address: NonNull<u8>,
+    pub(super) enum Tcs {
+        Static(NonNull<u8>),
+        Dynamic(ThreadResources),
     }
 
     impl Tcs {
-        fn new(address: NonNull<u8>) -> Tcs {
-            Tcs { address }
+        fn new_static(address: NonNull<u8>) -> Tcs {
+            Tcs::Static(address)
         }
 
-        pub(super) fn address(&self) -> &NonNull<u8> {
-            &self.address
+        fn new_dynamic(resources: ThreadResources) -> Tcs {
+            Tcs::Dynamic(resources)
+        }
+
+        pub(super) fn address(&self) -> NonNull<u8> {
+            match self {
+                Tcs::Static(ptr) => ptr.to_owned(),
+                Tcs::Dynamic(resources) => NonNull::new(resources.tcs.start()).unwrap(),
+            }
         }
     }
 
@@ -61,7 +95,7 @@ mod tcs_queue {
                     let address = NonNull::new(address as _).unwrap();
 
                     if address != thread::current() {
-                        tcs_queue.push(Tcs::new(address));
+                        tcs_queue.push(Tcs::new_static(address));
                     }
                 }
             }
@@ -76,25 +110,30 @@ mod tcs_queue {
         }
     }
 
-    pub(super) fn take_tcs(stack: usize) -> Option<Tcs> {
-        let mut tcs_queue = lock();
-        if let Some(tcs) = tcs_queue.pop() {
-            Some(tcs)
-        } else {
-            match abi::sgx_version() {
-                SgxVersion::SGXv1 => {
-                    None
-                },
-                SgxVersion::SGXv2 => {
-                    Some(Thread::create_dynamic_thread(stack));
-                }
+    pub(super) fn select_tcs(stack: usize) -> Option<Tcs> {
+        match abi::sgx_version() {
+            SgxVersion::SGXv1 => {
+                let mut tcs_queue = lock();
+                tcs_queue.pop()
+            },
+            SgxVersion::SGXv2 => {
+                Some(Tcs::new_dynamic(Thread::create_dynamic_thread(stack).ok()?))
             }
         }
     }
 
-    pub(super) fn add_tcs(tcs: Tcs) {
-        let mut tcs_queue = lock();
-        tcs_queue.insert(0, tcs);
+    pub(super) fn release_tcs(tcs: Tcs) {
+        match tcs {
+            Tcs::Static(tcs) => {
+                let mut tcs_queue = lock();
+                // The TCS may be scheduled before it actually finished execution. This is
+                // mitigated by the enclave runner by blocking until the TCS actually finished
+                tcs_queue.insert(0, Tcs::Static(tcs));
+            },
+            Tcs::Dynamic(resources) => {
+                thread_destructor::destruct_thread_resources(resources)
+            }
+        }
     }
 }
 
@@ -125,9 +164,7 @@ mod task_queue {
             p();
 
             let _ = done.send(());
-            // The TCS may be scheduled before it actually finished execution. This is
-            // mitigated by the enclave runner by blocking until the TCS actually finished
-            tcs_queue::add_tcs(tcs);
+            tcs_queue::release_tcs(tcs);
         }
     }
 
@@ -147,91 +184,77 @@ mod task_queue {
 
     pub(super) fn take_task(tcs: NonNull<u8>) -> Option<Task> {
         let mut tasks = lock();
-        let (i, _) = tasks.iter().enumerate().find(|(_i, task)| *task.tcs.address() == tcs)?;
+        let (i, _) = tasks.iter().enumerate().find(|(_i, task)| task.tcs.address() == tcs)?;
         let task = tasks.remove(i);
         Some(task)
     }
 }
 
 impl Thread {
-    fn create_dynamic_thread(stack_size: usize) -> io::Result<*mut u8> {
-        fn alloc_area(size: usize, alignment: usize) -> io::Result<*mut u8> {
-            let page =
-                unsafe { crate::alloc::alloc(Layout::from_size_align_unchecked(size, alignment)) };
-            if !page.is_null() { Ok(page) } else { Err(io::ErrorKind::UnexpectedEof.into()) }
-        }
-
-        /// Allocates a new stack guarded with guard pages
-        /// Returns a pointer to the top of the stack
-        fn alloc_stack(stack_size: usize) -> io::Result<(*mut u8, *mut u8)> {
-            let stack = alloc::alloc_guarded_area(stack_size, DEFAULT_STACK_GUARD_SIZE)
-                .ok_or(io::ErrorKind::UnexpectedEof)?;
-            let tos =
-                unsafe { stack.offset(DEFAULT_STACK_GUARD_SIZE as isize + stack_size as isize) };
-            Ok((stack, tos))
-        }
-
-        /// Allocates a new SSA stack
-        fn alloc_ssa_stack(nssa: usize) -> io::Result<*mut u8> {
-            alloc_area(nssa * Sgx::PAGE_SIZE, Sgx::PAGE_SIZE)
-        }
-
-        /// Creates a new TLS area
-        fn alloc_tls(stack_tos: *mut u8) -> io::Result<*mut u8> {
-            let tls_area = alloc_area(mem::size_of::<Tls>(), alloc::Sgx::PAGE_SIZE)?;
+    fn create_dynamic_thread(stack_size: usize) -> io::Result<ThreadResources> {
+        /// Creates a new TCS local storage area
+        fn alloc_tcsls(stack_tos: *mut u8) -> io::Result<MemoryArea> {
+            let tcsls_area = Sgx::alloc_guarded_area(alloc::Sgx::PAGE_SIZE, alloc::Sgx::PAGE_SIZE).ok_or(io::ErrorKind::UnexpectedEof)?;
             unsafe {
                 let tos_offset = stack_tos.offset_from(sgx_mem::image_base() as _).try_into().unwrap();
-                let tls_area = mem::transmute::<_, *mut Tls>(tls_area);
-                *tls_area = Tls::new(tos_offset, TlsFlags::SECONDARY_TCS);
+                let tcsls_area = mem::transmute::<_, *mut Tcsls>(tcsls_area.start());
+                *tcsls_area = Tcsls::new(tos_offset, TcslsFlags::SECONDARY_TCS);
             }
-            Ok(tls_area as _)
+            Ok(tcsls_area)
         }
 
-        fn new_tcs(stack_size: usize) -> io::Result<*mut u8> {
-            let (_stack, stack_tos) = alloc_stack(stack_size)?;
-            let ssa = alloc_ssa_stack(abi::nssa() as _)?;
-            let tls = alloc_tls(stack_tos)?;
+        fn new_tcs(stack_size: usize) -> io::Result<ThreadResources> {
+            let stack = Sgx::alloc_guarded_area(stack_size, DEFAULT_STACK_GUARD_SIZE).ok_or(io::ErrorKind::UnexpectedEof)?;
+            let ssa = Sgx::alloc_guarded_area(abi::nssa() as usize * Sgx::PAGE_SIZE, Sgx::PAGE_SIZE).ok_or(io::ErrorKind::UnexpectedEof)?;
+            let tcsls = alloc_tcsls(stack.end())?;
             let entry = unsafe { mem::transmute::<_, *const u8>(enclave_entry()) };
 
             unsafe {
-                let tcs: *mut Tcs = alloc_area(Sgx::PAGE_SIZE, Sgx::PAGE_SIZE)? as _;
+                let tcs_page = Sgx::alloc_guarded_area(Sgx::PAGE_SIZE, Sgx::PAGE_SIZE).ok_or(io::ErrorKind::UnexpectedEof)?;
+                let tcs: *mut Tcs = tcs_page.start() as _;
                 *tcs = Tcs {
-                    ossa: ssa.offset_from(sgx_mem::image_base() as _) as _,
+                    ossa: ssa.start().offset_from(sgx_mem::image_base() as _) as _,
                     nssa: abi::nssa() as _,
                     oentry: entry.offset_from(sgx_mem::image_base() as _) as _,
-                    ofsbasgx: tls.offset_from(sgx_mem::image_base() as _) as _,
-                    ogsbasgx: tls.offset_from(sgx_mem::image_base() as _) as _,
-                    fslimit: (mem::size_of::<Tls>() - 1) as _,
-                    gslimit: (mem::size_of::<Tls>() - 1) as _,
+                    ofsbasgx: tcsls.start().offset_from(sgx_mem::image_base() as _) as _,
+                    ogsbasgx: tcsls.start().offset_from(sgx_mem::image_base() as _) as _,
+                    fslimit: (mem::size_of::<Tcsls>() - 1) as _,
+                    gslimit: (mem::size_of::<Tcsls>() - 1) as _,
                     ..Tcs::default()
                 };
-                Ok(tcs as _)
+
+                Ok(ThreadResources {
+                    stack,
+                    ssa,
+                    tcsls,
+                    tcs: tcs_page,
+                })
             }
         }
 
-        let tcs = new_tcs(stack_size)?;
+        let resources = new_tcs(stack_size)?;
 
         // Ask SGX driver to change page type
-        usercalls::change_memory_type(tcs, Sgx::PAGE_SIZE, PageType::Tcs)?;
+        usercalls::change_memory_type(resources.tcs.start(), Sgx::PAGE_SIZE, PageType::Tcs)?;
 
         // Accept page type changes
         let flags = SecinfoFlags::from(PageType::Tcs) | SecinfoFlags::MODIFIED;
         let secinfo = Secinfo::from(flags).into();
-        arch::eaccept(tcs as _, &secinfo).map_err(|_e| {
+        arch::eaccept(resources.tcs.start() as _, &secinfo).map_err(|_e| {
             io::Error::new(io::ErrorKind::InvalidData, "OS prevented creation of TCS struct")
         })?;
 
-        Ok(tcs)
+        Ok(resources)
     }
 
     // unsafe: see thread::Builder::spawn_unchecked for safety requirements
     pub unsafe fn new(stack: usize, p: Box<dyn FnOnce()>) -> io::Result<Thread> {
-        let tcs = tcs_queue::take_tcs(stack).ok_or(io::Error::from(io::ErrorKind::WouldBlock))?;
+        let tcs = tcs_queue::select_tcs(stack).ok_or(io::Error::from(io::ErrorKind::WouldBlock))?;
         let mut tasks = task_queue::lock();
         unsafe { usercalls::launch_thread(tcs.address().as_ptr() as _)? };
         let (task, handle) = task_queue::Task::new(tcs, p);
         tasks.push(task);
-        Ok(Thread(handle))
+        Ok(Thread { handle })
     }
 
     pub(super) fn entry() {
