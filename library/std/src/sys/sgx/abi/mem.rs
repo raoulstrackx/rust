@@ -16,6 +16,7 @@ extern "C" {
     static HEAP_SIZE: usize;
     static UNMAPPED_SIZE: u64;
     static UNMAPPED_BASE: u64;
+    static TCS_LIST: u64;
 }
 
 /// Returns the base memory address of the heap
@@ -87,4 +88,11 @@ pub fn is_unmapped_range(p: *const u8, len: usize) -> bool {
     let start = p as u64;
     let end = start + (len as u64);
     start >= unmapped_base() && end <= unmapped_base() + unmapped_size() // unsafe ok: link-time constant
+}
+
+/// Returns the location of the TCS array. Each item in the array is a pointer (relative from
+/// enclave base) to a TCS created at enclave build time.
+#[unstable(feature = "sgx_platform", issue = "56975")]
+pub fn tcs_ptr_array() -> *const u64 {
+    unsafe { rel_ptr_mut(TCS_LIST) }
 }

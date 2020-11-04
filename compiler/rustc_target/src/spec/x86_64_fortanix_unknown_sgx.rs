@@ -53,6 +53,7 @@ pub fn target() -> Target {
         "EH_FRM_LEN",
         "TEXT_BASE",
         "TEXT_SIZE",
+        "TCS_LIST",
         "UNMAPPED_BASE",
         "UNMAPPED_SIZE",
     ];

@@ -72,6 +72,8 @@ IMAGE_BASE:
     globvar EH_FRM_OFFSET 8
     /*  The size in bytes of enclacve .eh_frame section */
     globvar EH_FRM_LEN 8
+    /*  The base address (relative to enclave start) of the TCS list */
+    globvar TCS_LIST 8
 
 .org .Lxsave_clear+512
 .Lxsave_header:
